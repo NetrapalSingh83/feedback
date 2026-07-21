@@ -26,15 +26,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sends a welcome message when the user types /start."""
     welcome_message = (
         "Hello! 👋\n"
-        "Please send your feedback image here, and I will forward it to the admin."
+        "Please send your feedback image (you can also add a message to it), and I will forward it to the admin."
     )
     await update.message.reply_text(welcome_message)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Forwards the received photo and updates the user's feedback count."""
+    """Forwards the received photo, user caption, and updates the user's feedback count."""
     photo_file_id = update.message.photo[-1].file_id
     sender_name = update.message.from_user.first_name
     sender_id = str(update.message.from_user.id)
+    
+    # Grab the text the user sent with the photo (if any)
+    user_message = update.message.caption 
     
     # --- Update Stats ---
     stats = load_stats()
@@ -48,15 +51,29 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_stats(stats)
     current_count = stats[sender_id]["count"]
     
-    # --- Forward to Admin ---
+    # --- Format Admin Caption ---
+    admin_caption = f"📸 New feedback received!\nFrom: {sender_name} (ID: {sender_id})"
+    
+    # If the user included a message, add it to the caption you see
+    if user_message:
+        admin_caption += f"\n\n💬 Message: {user_message}"
+    
+    # --- Forward to Admin (Split into two messages) ---
+    # 1. Send the image with the sender's info and their typed message
     await context.bot.send_photo(
         chat_id=ADMIN_CHAT_ID,
         photo=photo_file_id,
-        caption=f"📸 New feedback received!\nFrom: {sender_name} (ID: {sender_id})\n📊 Total sent by this user: {current_count}"
+        caption=admin_caption
+    )
+    
+    # 2. Send the total count as a separate text message right under the image
+    await context.bot.send_message(
+        chat_id=ADMIN_CHAT_ID,
+        text=f"📊 Total sent by this user: {current_count}"
     )
     
     # --- Reply to User ---
-    await update.message.reply_text("Thank you for your feedback! Your image has been received.\n You can send new feedback after this message.")
+    await update.message.reply_text("Thank you for your feedback! Your image has been received.\You can send new feedback again.")
     print(f"Forwarded image #{current_count} from {sender_name}.")
 
 async def reply_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -104,7 +121,6 @@ async def reset_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.message.from_user.id) != str(ADMIN_CHAT_ID):
         return
     
-    # Overwrite the stats file with an empty dictionary
     save_stats({})
     
     await update.message.reply_text("🔄 The leaderboard has been completely reset. All user counts are back to zero.")
@@ -118,8 +134,6 @@ def main():
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(CommandHandler("reply", reply_to_user))
     application.add_handler(CommandHandler("stats", show_stats))
-    
-    # New reset command handler
     application.add_handler(CommandHandler("reset", reset_stats)) 
 
     print("Bot is running... Waiting for feedback images. Press Ctrl+C to stop.")
